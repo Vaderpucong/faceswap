@@ -167,7 +167,7 @@ class MediaLoader():
         """ Load a requested frame from video """
         frame = os.path.splitext(filename)[0]
         logger.trace("Loading video frame: '%s'", frame)
-        frame_no = int(frame[frame.rfind("_") + 1:])
+        frame_no = int(frame[frame.rfind("_") + 1:]) - 1
         self.vid_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)  # pylint: disable=no-member
         _, image = self.vid_cap.read()
         return image
@@ -275,7 +275,7 @@ class ExtractedFaces():
     """ Holds the extracted faces and matrix for
         alignments """
     def __init__(self, frames, alignments, size=256, align_eyes=False):
-        logger.trace("Initializing %s: (size: %s, padding: %s, align_eyes: %s)",
+        logger.trace("Initializing %s: (size: %s, align_eyes: %s)",
                      self.__class__.__name__, size, align_eyes)
         self.size = size
         self.padding = int(size * 0.1875)
@@ -326,7 +326,8 @@ class ExtractedFaces():
             self.get_faces(frame)
         sizes = list()
         for face in self.faces:
-            top_left, top_right = face.original_roi[0], face.original_roi[3]
+            roi = face.original_roi.squeeze()
+            top_left, top_right = roi[0], roi[3]
             len_x = top_right[0] - top_left[0]
             len_y = top_right[1] - top_left[1]
             if top_left[1] == top_right[1]:

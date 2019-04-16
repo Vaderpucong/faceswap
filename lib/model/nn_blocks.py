@@ -14,9 +14,9 @@ from keras.layers import (add, Add, BatchNormalization, concatenate, Lambda, reg
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import Conv2D
 from keras.layers.core import Activation
-from keras.initializers import he_uniform, Constant
+from keras.initializers import he_uniform, Constant, VarianceScaling
 from .initializers import ICNR
-from .layers import PixelShuffler, Scale, SubPixelUpscaling, ReflectionPadding2D
+from .layers import PixelShuffler, SubPixelUpscaling, ReflectionPadding2D, Scale
 from .normalization import GroupNormalization, InstanceNormalization
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 class NNBlocks():
     """ Blocks to use for creating models """
     def __init__(self, use_subpixel=False, use_icnr_init=False, use_reflect_padding=False):
-        logger.debug("Initializing %s: (use_subpixel: %s, use_icnr_init: %s, use_reflect_padding: %s",
+        logger.debug("Initializing %s: (use_subpixel: %s, use_icnr_init: %s, use_reflect_padding: %s)",
                      self.__class__.__name__, use_subpixel, use_icnr_init, use_reflect_padding)
         self.use_subpixel = use_subpixel
         self.use_icnr_init = use_icnr_init
@@ -42,7 +42,7 @@ class NNBlocks():
     def conv(self, inp, filters, kernel_size=5, strides=2, padding='same', use_instance_norm=False, res_block_follows=False, **kwargs):
         """ Convolution Layer"""
         logger.debug("inp: %s, filters: %s, kernel_size: %s, strides: %s, use_instance_norm: %s, "
-                     "kwargs: %s", inp, filters, kernel_size, strides, use_instance_norm, kwargs)
+                     "kwargs: %s)", inp, filters, kernel_size, strides, use_instance_norm, kwargs)
         kwargs = self.update_kwargs(kwargs)
         if self.use_reflect_padding:
             inp = ReflectionPadding2D(stride=strides, kernel_size=kernel_size)(inp)
@@ -60,18 +60,20 @@ class NNBlocks():
 
     def upscale(self, inp, filters, kernel_size=3, padding= 'same', use_instance_norm=False, res_block_follows=False, **kwargs):
         """ Upscale Layer """
-        logger.debug("inp: %s, filters: %s, kernel_size: %s, use_instance_norm: %s, kwargs: %s",
+        logger.debug("inp: %s, filters: %s, kernel_size: %s, use_instance_norm: %s, kwargs: %s)",
                      inp, filters, kernel_size, use_instance_norm, kwargs)
         kwargs = self.update_kwargs(kwargs)
         if self.use_reflect_padding:
             inp = ReflectionPadding2D(stride=1, kernel_size=kernel_size)(inp)
             padding = 'valid'
+        temp = kwargs["kernel_initializer"]
         if self.use_icnr_init:
             kwargs["kernel_initializer"] = ICNR(initializer=kwargs["kernel_initializer"])
         var_x = Conv2D(filters * 4,
                        kernel_size=kernel_size,
                        padding=padding,
                        **kwargs)(inp)
+        kwargs["kernel_initializer"] = temp
         if use_instance_norm:
             var_x = InstanceNormalization()(var_x)
         if not res_block_follows:
@@ -85,7 +87,7 @@ class NNBlocks():
     # <<< DFaker Model Blocks >>> #
     def res_block(self, inp, filters, kernel_size=3, padding= 'same', **kwargs):
         """ Residual block """
-        logger.debug("inp: %s, filters: %s, kernel_size: %s, kwargs: %s",
+        logger.debug("inp: %s, filters: %s, kernel_size: %s, kwargs: %s)",
                      inp, filters, kernel_size, kwargs)
         kwargs = self.update_kwargs(kwargs)
         var_x = LeakyReLU(alpha=0.2)(inp)
@@ -100,11 +102,15 @@ class NNBlocks():
         if self.use_reflect_padding:
             var_x = ReflectionPadding2D(stride=1, kernel_size=kernel_size)(var_x)
             padding = 'valid'
+        temp = kwargs["kernel_initializer"]
+        kwargs["kernel_initializer"] = VarianceScaling(scale=0.2,
+                                                       mode='fan_in',
+                                                       distribution='uniform')
         var_x = Conv2D(filters,
                        kernel_size=kernel_size,
                        padding=padding,
                        **kwargs)(var_x)
-        var_x = Scale(gamma_init=Constant(value=0.1))(var_x)
+        kwargs["kernel_initializer"] = temp
         var_x = Add()([var_x, inp])
         var_x = LeakyReLU(alpha=0.2)(var_x)
         return var_x
@@ -112,7 +118,7 @@ class NNBlocks():
     # <<< Unbalanced Model Blocks >>> #
     def conv_sep(self, inp, filters, kernel_size=5, strides=2, **kwargs):
         """ Seperable Convolution Layer """
-        logger.debug("inp: %s, filters: %s, kernel_size: %s, strides: %s, kwargs: %s",
+        logger.debug("inp: %s, filters: %s, kernel_size: %s, strides: %s, kwargs: %s)",
                      inp, filters, kernel_size, strides, kwargs)
         kwargs = self.update_kwargs(kwargs)
         var_x = SeparableConv2D(filters,
